@@ -409,6 +409,7 @@ private fun setupCamera(
 
         val imageCapture = ImageCapture.Builder()
             .setTargetRotation(previewView.display.rotation)
+            .setCaptureMode(ImageCapture.CAPTURE_MODE_MAXIMIZE_QUALITY)
             .build()
 
         try {
@@ -440,10 +441,9 @@ private fun captureImage(
         ContextCompat.getMainExecutor(context),
         object : ImageCapture.OnImageSavedCallback {
             override fun onImageSaved(output: ImageCapture.OutputFileResults) {
-                // Load the saved image as bitmap
-                val bitmap = android.graphics.BitmapFactory.decodeFile(
-                    context.cacheDir.resolve("temp_image.jpg").absolutePath
-                )
+                // Load the saved image as bitmap and handle rotation
+                val filePath = context.cacheDir.resolve("temp_image.jpg").absolutePath
+                val bitmap = loadBitmapWithCorrectOrientation(filePath)
                 bitmap?.let(onImageCaptured)
             }
 
@@ -452,4 +452,51 @@ private fun captureImage(
             }
         }
     )
+}
+
+private fun loadBitmapWithCorrectOrientation(filePath: String): Bitmap? {
+    return try {
+        // Load the bitmap
+        val bitmap = android.graphics.BitmapFactory.decodeFile(filePath) ?: return null
+
+        // Read EXIF data to get orientation
+        val exif = androidx.exifinterface.media.ExifInterface(filePath)
+        val orientation = exif.getAttributeInt(
+            androidx.exifinterface.media.ExifInterface.TAG_ORIENTATION,
+            androidx.exifinterface.media.ExifInterface.ORIENTATION_NORMAL
+        )
+
+        // Calculate rotation angle based on EXIF orientation
+        val rotationAngle = when (orientation) {
+            androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_90 -> 90f
+            androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_180 -> 180f
+            androidx.exifinterface.media.ExifInterface.ORIENTATION_ROTATE_270 -> 270f
+            else -> 0f
+        }
+
+        // If no rotation needed, return original bitmap
+        if (rotationAngle == 0f) {
+            return bitmap
+        }
+
+        // Create rotation matrix and apply it
+        val matrix = android.graphics.Matrix()
+        matrix.postRotate(rotationAngle)
+
+        // Create rotated bitmap
+        val rotatedBitmap = Bitmap.createBitmap(
+            bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true
+        )
+
+        // Recycle original bitmap to free memory
+        if (bitmap != rotatedBitmap) {
+            bitmap.recycle()
+        }
+
+        rotatedBitmap
+    } catch (e: Exception) {
+        e.printStackTrace()
+        // Fallback to basic loading if EXIF reading fails
+        android.graphics.BitmapFactory.decodeFile(filePath)
+    }
 }
